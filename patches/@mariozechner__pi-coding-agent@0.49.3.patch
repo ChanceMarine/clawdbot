@@ -1,0 +1,76 @@
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+index f064f088f5929187a81bde7f6237c44258502e68..ea1a4be4c2d8431c49d47a15c234d5e181c32822 100644
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -526,7 +526,7 @@ export class SessionManager {
+         const entry = {
+             type: "message",
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+             message,
+         };
+@@ -538,7 +538,7 @@ export class SessionManager {
+         const entry = {
+             type: "thinking_level_change",
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+             thinkingLevel,
+         };
+@@ -550,7 +550,7 @@ export class SessionManager {
+         const entry = {
+             type: "model_change",
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+             provider,
+             modelId,
+@@ -563,7 +563,7 @@ export class SessionManager {
+         const entry = {
+             type: "compaction",
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+             summary,
+             firstKeptEntryId,
+@@ -581,7 +581,7 @@ export class SessionManager {
+             customType,
+             data,
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+         };
+         this._appendEntry(entry);
+@@ -592,7 +592,7 @@ export class SessionManager {
+         const entry = {
+             type: "session_info",
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+             name: name.trim(),
+         };
+@@ -627,7 +627,7 @@ export class SessionManager {
+             display,
+             details,
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+         };
+         this._appendEntry(entry);
+@@ -675,7 +675,7 @@ export class SessionManager {
+         const entry = {
+             type: "label",
+             id: generateId(this.byId),
+-            parentId: this.leafId,
++            parentId: this.leafId ?? null,
+             timestamp: new Date().toISOString(),
+             targetId,
+             label,

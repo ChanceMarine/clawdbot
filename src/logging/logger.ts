@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { Logger as TsLogger } from "tslog";
@@ -10,9 +11,13 @@ import { type LogLevel, levelToMinLevel, normalizeLogLevel } from "./levels.js";
 import { readLoggingConfig } from "./config.js";
 import { loggingState } from "./state.js";
 
-// Pin to /tmp so mac Debug UI and docs match; os.tmpdir() can be a per-user
-// randomized path on macOS which made the “Open log” button a no-op.
-export const DEFAULT_LOG_DIR = "/tmp/clawdbot";
+// Security: Use ~/.clawdbot/logs instead of /tmp to avoid world-readable log exposure.
+// The stateDir default is ~/.clawdbot; logs go under logs/ subdirectory.
+function resolveDefaultLogDir(): string {
+  const stateDir = process.env.CLAWDBOT_STATE_DIR?.trim() || path.join(os.homedir(), ".clawdbot");
+  return path.join(stateDir, "logs");
+}
+export const DEFAULT_LOG_DIR = resolveDefaultLogDir();
 export const DEFAULT_LOG_FILE = path.join(DEFAULT_LOG_DIR, "clawdbot.log"); // legacy single-file path
 
 const LOG_PREFIX = "clawdbot";

@@ -81,6 +81,8 @@ const BASE_METHODS = [
   "chat.history",
   "chat.abort",
   "chat.send",
+  "chat.inject",
+  "chat.react",
 ];
 
 export function listGatewayMethods(): string[] {
@@ -92,6 +94,7 @@ export const GATEWAY_EVENTS = [
   "connect.challenge",
   "agent",
   "chat",
+  "chat.reaction",
   "presence",
   "tick",
   "talk.mode",

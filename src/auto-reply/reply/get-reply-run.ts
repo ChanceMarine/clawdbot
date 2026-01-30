@@ -102,6 +102,8 @@ type RunPreparedReplyParams = {
   storePath?: string;
   workspaceDir: string;
   abortedLastRun: boolean;
+  /** Warning context to prepend if prompt injection was detected */
+  injectionWarning?: string | null;
 };
 
 export async function runPreparedReply(
@@ -154,6 +156,7 @@ export async function runPreparedReply(
     execOverrides,
     abortedLastRun,
   } = params;
+  const { injectionWarning } = params;
   let currentSystemSent = systemSent;
 
   const isFirstTurnInSession = isNewSession || !currentSystemSent;
@@ -179,7 +182,10 @@ export async function runPreparedReply(
       })
     : "";
   const groupSystemPrompt = sessionCtx.GroupSystemPrompt?.trim() ?? "";
-  const extraSystemPrompt = [groupIntro, groupSystemPrompt].filter(Boolean).join("\n\n");
+  // Prepend injection warning if detected (security context for the AI)
+  const extraSystemPrompt = [injectionWarning, groupIntro, groupSystemPrompt]
+    .filter(Boolean)
+    .join("\n\n");
   const baseBody = sessionCtx.BodyStripped ?? sessionCtx.Body ?? "";
   // Use CommandBody/RawBody for bare reset detection (clean message without structural context).
   const rawBodyTrimmed = (ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "").trim();
@@ -382,6 +388,7 @@ export async function runPreparedReply(
       verboseLevel: resolvedVerboseLevel,
       reasoningLevel: resolvedReasoningLevel,
       elevatedLevel: resolvedElevatedLevel,
+      permissionMode: sessionEntry?.permissionMode,
       execOverrides,
       bashElevated: {
         enabled: elevatedEnabled,

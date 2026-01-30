@@ -22,6 +22,7 @@ import {
   htmlToMarkdown,
   markdownToText,
   truncateText,
+  wrapUntrustedWebContent,
   type ExtractMode,
 } from "./web-fetch-utils.js";
 
@@ -375,19 +376,21 @@ async function runWebFetch(params: {
         timeoutSeconds: params.firecrawlTimeoutSeconds,
       });
       const truncated = truncateText(firecrawl.text, params.maxChars);
+      const firecrawlFinalUrl = firecrawl.finalUrl || finalUrl;
+      const wrappedText = wrapUntrustedWebContent(truncated.text, firecrawlFinalUrl);
       const payload = {
         url: params.url,
-        finalUrl: firecrawl.finalUrl || finalUrl,
+        finalUrl: firecrawlFinalUrl,
         status: firecrawl.status ?? 200,
         contentType: "text/markdown",
         title: firecrawl.title,
         extractMode: params.extractMode,
         extractor: "firecrawl",
         truncated: truncated.truncated,
-        length: truncated.text.length,
+        length: wrappedText.length,
         fetchedAt: new Date().toISOString(),
         tookMs: Date.now() - start,
-        text: truncated.text,
+        text: wrappedText,
         warning: firecrawl.warning,
       };
       writeCache(FETCH_CACHE, cacheKey, payload, params.cacheTtlMs);
@@ -410,19 +413,21 @@ async function runWebFetch(params: {
         timeoutSeconds: params.firecrawlTimeoutSeconds,
       });
       const truncated = truncateText(firecrawl.text, params.maxChars);
+      const firecrawlFinalUrl = firecrawl.finalUrl || finalUrl;
+      const wrappedText = wrapUntrustedWebContent(truncated.text, firecrawlFinalUrl);
       const payload = {
         url: params.url,
-        finalUrl: firecrawl.finalUrl || finalUrl,
+        finalUrl: firecrawlFinalUrl,
         status: firecrawl.status ?? res.status,
         contentType: "text/markdown",
         title: firecrawl.title,
         extractMode: params.extractMode,
         extractor: "firecrawl",
         truncated: truncated.truncated,
-        length: truncated.text.length,
+        length: wrappedText.length,
         fetchedAt: new Date().toISOString(),
         tookMs: Date.now() - start,
-        text: truncated.text,
+        text: wrappedText,
         warning: firecrawl.warning,
       };
       writeCache(FETCH_CACHE, cacheKey, payload, params.cacheTtlMs);
@@ -482,6 +487,7 @@ async function runWebFetch(params: {
   }
 
   const truncated = truncateText(text, params.maxChars);
+  const wrappedText = wrapUntrustedWebContent(truncated.text, finalUrl);
   const payload = {
     url: params.url,
     finalUrl,
@@ -491,10 +497,10 @@ async function runWebFetch(params: {
     extractMode: params.extractMode,
     extractor,
     truncated: truncated.truncated,
-    length: truncated.text.length,
+    length: wrappedText.length,
     fetchedAt: new Date().toISOString(),
     tookMs: Date.now() - start,
-    text: truncated.text,
+    text: wrappedText,
   };
   writeCache(FETCH_CACHE, cacheKey, payload, params.cacheTtlMs);
   return payload;

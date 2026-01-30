@@ -5,6 +5,7 @@ import type { AppViewState } from "./app-view-state";
 import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation";
 import { loadChatHistory } from "./controllers/chat";
 import { syncUrlWithSessionKey } from "./app-settings";
+import { loadSessions, patchSession } from "./controllers/sessions";
 import type { SessionsListResult } from "./types";
 import type { ThemeMode } from "./theme";
 import type { ThemeTransitionContext } from "./theme-transition";
@@ -41,7 +42,12 @@ export function renderChatControls(state: AppViewState) {
   const sessionOptions = resolveSessionOptions(state.sessionKey, state.sessionsResult);
   const disableThinkingToggle = state.onboarding;
   const disableFocusToggle = state.onboarding;
-  const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
+  // Get reasoning level from the current session
+  const activeSession = state.sessionsResult?.sessions?.find(
+    (s) => s.key === state.sessionKey,
+  );
+  const reasoningLevel = activeSession?.reasoningLevel ?? "off";
+  const reasoningActive = reasoningLevel !== "off";
   const focusActive = state.onboarding ? true : state.settings.chatFocusMode;
   // Refresh icon
   const refreshIcon = html`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>`;
@@ -94,19 +100,17 @@ export function renderChatControls(state: AppViewState) {
       </button>
       <span class="chat-controls__separator">|</span>
       <button
-        class="btn btn--sm btn--icon ${showThinking ? "active" : ""}"
-        ?disabled=${disableThinkingToggle}
-        @click=${() => {
-          if (disableThinkingToggle) return;
-          state.applySettings({
-            ...state.settings,
-            chatShowThinking: !state.settings.chatShowThinking,
-          });
+        class="btn btn--sm btn--icon ${reasoningActive ? "active" : ""}"
+        ?disabled=${disableThinkingToggle || !state.connected}
+        @click=${async () => {
+          if (disableThinkingToggle || !state.connected) return;
+          const newLevel = reasoningActive ? "off" : "on";
+          await patchSession(state, state.sessionKey, { reasoningLevel: newLevel });
         }}
-        aria-pressed=${showThinking}
+        aria-pressed=${reasoningActive}
         title=${disableThinkingToggle
           ? "Disabled during onboarding"
-          : "Toggle assistant thinking/working output"}
+          : `Toggle extended thinking (currently ${reasoningLevel})`}
       >
         🧠
       </button>

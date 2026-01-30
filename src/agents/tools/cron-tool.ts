@@ -8,6 +8,127 @@ import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool, type GatewayCallOptions } from "./gateway.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-helpers.js";
 
+// ============================================================================
+// Cron Job Payload Security Validation
+// ============================================================================
+
+/** Maximum allowed length for cron job text payload to prevent abuse */
+const CRON_TEXT_MAX_LENGTH = 10_000;
+
+/** Maximum allowed length for cron expression to prevent abuse */
+const CRON_EXPRESSION_MAX_LENGTH = 100;
+
+/** Patterns that could indicate injection attempts in cron payloads */
+const SUSPICIOUS_PATTERNS = [
+  // Shell injection patterns
+  /;\s*(?:rm|wget|curl|bash|sh|python|perl|ruby|nc|netcat)\s/i,
+  /\$\([^)]+\)/,
+  /`[^`]+`/,
+  // Script injection patterns
+  /<script[\s>]/i,
+  /javascript:/i,
+  // SQL injection patterns
+  /(?:union\s+select|drop\s+table|delete\s+from|insert\s+into)\s/i,
+  // Path traversal
+  /\.\.[\/\\]/,
+];
+
+/**
+ * Validates a cron job payload for security issues.
+ * Checks for:
+ * - Excessive payload size
+ * - Suspicious patterns that could indicate injection
+ * - Invalid cron expressions
+ *
+ * @param job The cron job object to validate
+ * @returns Object with isValid boolean and reason string
+ */
+export function validateCronJobPayload(job: unknown): { isValid: boolean; reason: string } {
+  if (!job || typeof job !== "object") {
+    return { isValid: false, reason: "Job must be a non-null object" };
+  }
+
+  const jobObj = job as Record<string, unknown>;
+
+  // Validate cron expression length
+  if (typeof jobObj.cron === "string" && jobObj.cron.length > CRON_EXPRESSION_MAX_LENGTH) {
+    return {
+      isValid: false,
+      reason: `Cron expression exceeds maximum length of ${CRON_EXPRESSION_MAX_LENGTH} characters`,
+    };
+  }
+
+  // Validate payload if present
+  const payload = jobObj.payload;
+  if (payload && typeof payload === "object") {
+    const payloadObj = payload as Record<string, unknown>;
+
+    // Check text field length
+    if (typeof payloadObj.text === "string") {
+      if (payloadObj.text.length > CRON_TEXT_MAX_LENGTH) {
+        return {
+          isValid: false,
+          reason: `Payload text exceeds maximum length of ${CRON_TEXT_MAX_LENGTH} characters`,
+        };
+      }
+
+      // Check for suspicious patterns
+      for (const pattern of SUSPICIOUS_PATTERNS) {
+        if (pattern.test(payloadObj.text)) {
+          return {
+            isValid: false,
+            reason: `Payload text contains suspicious pattern that may indicate injection attempt`,
+          };
+        }
+      }
+    }
+
+    // Check for unexpected executable fields
+    if ("command" in payloadObj || "script" in payloadObj || "exec" in payloadObj) {
+      return {
+        isValid: false,
+        reason: "Payload contains disallowed executable field (command/script/exec)",
+      };
+    }
+  }
+
+  // Validate name/description fields for injection
+  for (const field of ["name", "description", "note"]) {
+    if (typeof jobObj[field] === "string") {
+      const value = jobObj[field] as string;
+      if (value.length > 500) {
+        return {
+          isValid: false,
+          reason: `Field "${field}" exceeds maximum length of 500 characters`,
+        };
+      }
+      for (const pattern of SUSPICIOUS_PATTERNS) {
+        if (pattern.test(value)) {
+          return {
+            isValid: false,
+            reason: `Field "${field}" contains suspicious pattern that may indicate injection attempt`,
+          };
+        }
+      }
+    }
+  }
+
+  return { isValid: true, reason: "Payload validation passed" };
+}
+
+/**
+ * Validates a cron job patch for security issues.
+ * Similar to validateCronJobPayload but for partial updates.
+ */
+export function validateCronJobPatch(patch: unknown): { isValid: boolean; reason: string } {
+  if (!patch || typeof patch !== "object") {
+    return { isValid: false, reason: "Patch must be a non-null object" };
+  }
+
+  // Use the same validation logic as job creation
+  return validateCronJobPayload(patch);
+}
+
 // NOTE: We use Type.Object({}, { additionalProperties: true }) for job/patch
 // instead of CronAddParamsSchema/CronJobPatchSchema because the gateway schemas
 // contain nested unions. Tool schemas need to stay provider-friendly, so we
@@ -159,6 +280,11 @@ export function createCronTool(opts?: CronToolOptions): AnyAgentTool {
             throw new Error("job required");
           }
           const job = normalizeCronJobCreate(params.job) ?? params.job;
+          // Validate job payload for security before creating
+          const jobValidation = validateCronJobPayload(job);
+          if (!jobValidation.isValid) {
+            throw new Error(`Cron job validation failed: ${jobValidation.reason}`);
+          }
           if (job && typeof job === "object" && !("agentId" in job)) {
             const cfg = loadConfig();
             const agentId = opts?.agentSessionKey
@@ -202,6 +328,11 @@ export function createCronTool(opts?: CronToolOptions): AnyAgentTool {
             throw new Error("patch required");
           }
           const patch = normalizeCronJobPatch(params.patch) ?? params.patch;
+          // Validate patch payload for security before updating
+          const patchValidation = validateCronJobPatch(patch);
+          if (!patchValidation.isValid) {
+            throw new Error(`Cron job patch validation failed: ${patchValidation.reason}`);
+          }
           return jsonResult(
             await callGatewayTool("cron.update", gatewayOpts, {
               id,

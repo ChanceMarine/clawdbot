@@ -1,4 +1,5 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { setApprovalEventEmitter } from "../agents/approval/index.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import type { CanvasHostServer } from "../canvas-host/server.js";
@@ -313,6 +314,12 @@ export async function startGatewayServer(
     broadcast("voicewake.changed", { triggers }, { dropIfSlow: true });
   };
   const hasMobileNodeConnected = () => hasConnectedMobileNode(nodeRegistry);
+
+  // Wire up approval event emitter for interactive Ask mode
+  setApprovalEventEmitter(({ sessionKey, runId, data }) => {
+    broadcast("approval", { ...data, sessionKey, runId });
+  });
+
   applyGatewayLaneConcurrency(cfgAtStart);
 
   let cronState = buildGatewayCronService({
@@ -338,6 +345,8 @@ export async function startGatewayServer(
       ? { enabled: true, fingerprintSha256: gatewayTls.fingerprintSha256 }
       : undefined,
     wideAreaDiscoveryEnabled: cfgAtStart.discovery?.wideArea?.enabled === true,
+    // Security: default to minimal mode to reduce mDNS information disclosure
+    bonjourMode: cfgAtStart.discovery?.bonjour?.mode ?? "minimal",
     logDiscovery,
   });
   bonjourStop = discovery.bonjourStop;

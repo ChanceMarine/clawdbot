@@ -333,6 +333,7 @@ export async function runEmbeddedPiAgent(
             toolResultFormat: resolvedToolResultFormat,
             execOverrides: params.execOverrides,
             bashElevated: params.bashElevated,
+            permissionMode: params.permissionMode,
             timeoutMs: params.timeoutMs,
             runId: params.runId,
             abortSignal: params.abortSignal,

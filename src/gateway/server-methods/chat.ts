@@ -7,6 +7,7 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveEffectiveMessagesConfig, resolveIdentityName } from "../../agents/identity.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
+import { abortEmbeddedPiRun, isEmbeddedPiRunActive } from "../../agents/pi-embedded.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import {
@@ -30,6 +31,7 @@ import {
   validateChatAbortParams,
   validateChatHistoryParams,
   validateChatInjectParams,
+  validateChatReactParams,
   validateChatSendParams,
 } from "../protocol/index.js";
 import { getMaxChatHistoryMessagesBytes } from "../server-constants.js";
@@ -259,18 +261,27 @@ export const chatHandlers: GatewayRequestHandlers = {
       nodeSendToSession: context.nodeSendToSession,
     };
 
+    // Also abort any embedded Pi runs for this session
+    const { entry } = loadSessionEntry(sessionKey);
+    const sessionId = entry?.sessionId;
+    let embeddedAborted = false;
+    if (sessionId) {
+      embeddedAborted = abortEmbeddedPiRun(sessionId);
+    }
+
     if (!runId) {
       const res = abortChatRunsForSessionKey(ops, {
         sessionKey,
         stopReason: "rpc",
       });
-      respond(true, { ok: true, aborted: res.aborted, runIds: res.runIds });
+      respond(true, { ok: true, aborted: res.aborted || embeddedAborted, runIds: res.runIds });
       return;
     }
 
     const active = context.chatAbortControllers.get(runId);
     if (!active) {
-      respond(true, { ok: true, aborted: false, runIds: [] });
+      // No chat run found with this ID, but we may have aborted an embedded run
+      respond(true, { ok: true, aborted: embeddedAborted, runIds: [] });
       return;
     }
     if (active.sessionKey !== sessionKey) {
@@ -289,7 +300,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     });
     respond(true, {
       ok: true,
-      aborted: res.aborted,
+      aborted: res.aborted || embeddedAborted,
       runIds: res.aborted ? [runId] : [],
     });
   },
@@ -409,6 +420,17 @@ export const chatHandlers: GatewayRequestHandlers = {
         cached: true,
         runId: clientRunId,
       });
+      return;
+    }
+
+    // Check if there's already an active AI run for this session
+    const sessionId = entry?.sessionId;
+    if (sessionId && isEmbeddedPiRunActive(sessionId)) {
+      respond(
+        false,
+        { runId: clientRunId, status: "busy" as const },
+        errorShape(ErrorCodes.UNAVAILABLE, "AI is still processing a previous request"),
+      );
       return;
     }
 
@@ -584,6 +606,161 @@ export const chatHandlers: GatewayRequestHandlers = {
         error: formatForLog(err),
       });
     }
+  },
+  "chat.react": async ({ params, respond, context }) => {
+    if (!validateChatReactParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid chat.react params: ${formatValidationErrors(validateChatReactParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    const p = params as {
+      sessionKey: string;
+      messageId: string;
+      emoji: string;
+      remove?: boolean;
+    };
+
+    // Load session to find transcript file
+    const { cfg, storePath, entry } = loadSessionEntry(p.sessionKey);
+    const sessionId = entry?.sessionId;
+    if (!sessionId || !storePath) {
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "session not found"));
+      return;
+    }
+
+    // Resolve transcript path
+    const transcriptPath = entry?.sessionFile
+      ? entry.sessionFile
+      : path.join(path.dirname(storePath), `${sessionId}.jsonl`);
+
+    if (!fs.existsSync(transcriptPath)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "transcript file not found"),
+      );
+      return;
+    }
+
+    // Resolve messageId - if it's a UUID (from ClydeControl's runId), we need to find the actual transcript ID
+    // This is a workaround because ClydeControl uses runId (UUID) but transcript uses short 8-char IDs
+    let resolvedMessageId = p.messageId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      p.messageId,
+    );
+    if (isUuid) {
+      try {
+        const lines = fs.readFileSync(transcriptPath, "utf-8").split("\n").filter(Boolean);
+        // First check if this UUID exactly matches any message ID (shouldn't, but be safe)
+        let found = false;
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type === "message" && entry.id === p.messageId) {
+              found = true;
+              break;
+            }
+          } catch {
+            /* skip */
+          }
+        }
+        // If not found, find the most recent message (common case: reacting to last response)
+        if (!found) {
+          for (let i = lines.length - 1; i >= 0; i--) {
+            try {
+              const entry = JSON.parse(lines[i]);
+              if (entry.type === "message" && entry.id) {
+                resolvedMessageId = entry.id;
+                break;
+              }
+            } catch {
+              /* skip bad lines */
+            }
+          }
+        }
+      } catch {
+        /* use original if read fails */
+      }
+    }
+
+    // Build reaction entry
+    const now = Date.now();
+    const reactionEntry = {
+      type: "reaction",
+      messageId: resolvedMessageId,
+      emoji: p.emoji,
+      reactor: "user",
+      action: p.remove ? "remove" : "add",
+      timestamp: new Date(now).toISOString(),
+    };
+
+    // Append to transcript file
+    try {
+      fs.appendFileSync(transcriptPath, `${JSON.stringify(reactionEntry)}\n`, "utf-8");
+    } catch (err) {
+      const errMessage = err instanceof Error ? err.message : String(err);
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, `failed to write reaction: ${errMessage}`),
+      );
+      return;
+    }
+
+    // For add reactions, dispatch a hidden message through the normal message flow
+    // This ensures proper parentId chaining. The message is hidden from UI but AI sees it.
+    if (!p.remove) {
+      const hiddenRunId = `react-${randomUUID().slice(0, 8)}`;
+      const hiddenCtx: MsgContext = {
+        Body: `[reacted ${p.emoji} to your last message]`,
+        BodyForAgent: `[reacted ${p.emoji} to your last message]`,
+        RawBody: `[reacted ${p.emoji} to your last message]`,
+        SessionKey: p.sessionKey,
+        Provider: INTERNAL_MESSAGE_CHANNEL,
+        Surface: INTERNAL_MESSAGE_CHANNEL,
+        OriginatingChannel: INTERNAL_MESSAGE_CHANNEL,
+        ChatType: "direct",
+        CommandAuthorized: false, // Don't allow commands in reaction messages
+        MessageSid: hiddenRunId,
+        HiddenMessage: true, // Flag to hide from UI
+      };
+
+      const hiddenDispatcher = createReplyDispatcher({
+        onError: () => {}, // Silently ignore errors for reaction messages
+        deliver: async () => {}, // Don't deliver responses - AI will respond via normal broadcast
+      });
+
+      // Fire and forget - AI will respond via normal chat broadcast
+      void dispatchInboundMessage({
+        ctx: hiddenCtx,
+        cfg,
+        dispatcher: hiddenDispatcher,
+        replyOptions: {
+          runId: hiddenRunId,
+        },
+      }).catch(() => {
+        // Non-fatal: reaction was recorded, hidden message dispatch failed
+      });
+    }
+
+    // Broadcast reaction event to all subscribers
+    const reactionPayload = {
+      sessionKey: p.sessionKey,
+      messageId: p.messageId,
+      emoji: p.emoji,
+      reactor: "user",
+      action: p.remove ? "remove" : "add",
+    };
+    context.broadcast("chat.reaction", reactionPayload);
+    context.nodeSendToSession(p.sessionKey, "chat.reaction", reactionPayload);
+
+    respond(true, { ok: true });
   },
   "chat.inject": async ({ params, respond, context }) => {
     if (!validateChatInjectParams(params)) {

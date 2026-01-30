@@ -55,6 +55,7 @@ export type SessionEntry = {
   groupActivation?: "mention" | "always";
   groupActivationNeedsSystemIntro?: boolean;
   sendPolicy?: "allow" | "deny";
+  permissionMode?: "plan" | "ask" | "auto" | "dangerously-skip";
   queueMode?:
     | "steer"
     | "followup"

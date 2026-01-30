@@ -6,6 +6,16 @@ import { resolveSessionTranscriptPath } from "../config/sessions.js";
 import { stripEnvelope } from "./chat-sanitize.js";
 import type { SessionPreviewItem } from "./session-utils.types.js";
 
+type ReactionEntry = {
+  emoji: string;
+  reactor: string;
+  timestamp: string;
+};
+
+type MessageWithReactions = Record<string, unknown> & {
+  reactions?: ReactionEntry[];
+};
+
 export function readSessionMessages(
   sessionId: string,
   storePath: string | undefined,
@@ -17,18 +27,65 @@ export function readSessionMessages(
   if (!filePath) return [];
 
   const lines = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
-  const messages: unknown[] = [];
+  const messages: MessageWithReactions[] = [];
+  const messageIdIndex = new Map<string, number>(); // messageId -> index in messages array
+  const reactionsByMessageId = new Map<string, ReactionEntry[]>();
+
   for (const line of lines) {
     if (!line.trim()) continue;
     try {
       const parsed = JSON.parse(line);
-      if (parsed?.message) {
-        messages.push(parsed.message);
+
+      // Handle message entries (skip hidden messages - they're for AI context only)
+      if (parsed?.message && !parsed?.hidden) {
+        const msg = parsed.message as MessageWithReactions;
+        const msgId = parsed.id as string | undefined;
+        // Attach message ID to the message object so clients can reference it
+        if (msgId) {
+          (msg as Record<string, unknown>).id = msgId;
+          messageIdIndex.set(msgId, messages.length);
+        }
+        messages.push(msg);
+      }
+
+      // Handle reaction entries
+      if (parsed?.type === "reaction" && parsed?.messageId) {
+        const messageId = parsed.messageId as string;
+        const emoji = parsed.emoji as string;
+        const reactor = parsed.reactor as string;
+        const timestamp = parsed.timestamp as string;
+        const action = (parsed.action as string) ?? "add";
+
+        if (!reactionsByMessageId.has(messageId)) {
+          reactionsByMessageId.set(messageId, []);
+        }
+        const reactions = reactionsByMessageId.get(messageId)!;
+
+        if (action === "remove") {
+          // Remove matching reaction
+          const idx = reactions.findIndex((r) => r.emoji === emoji && r.reactor === reactor);
+          if (idx !== -1) reactions.splice(idx, 1);
+        } else {
+          // Add reaction (avoid duplicates)
+          const exists = reactions.some((r) => r.emoji === emoji && r.reactor === reactor);
+          if (!exists) {
+            reactions.push({ emoji, reactor, timestamp });
+          }
+        }
       }
     } catch {
       // ignore bad lines
     }
   }
+
+  // Merge reactions into messages
+  for (const [messageId, reactions] of reactionsByMessageId) {
+    const idx = messageIdIndex.get(messageId);
+    if (idx !== undefined && reactions.length > 0) {
+      messages[idx].reactions = reactions;
+    }
+  }
+
   return messages;
 }
 

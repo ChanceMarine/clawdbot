@@ -21,6 +21,7 @@ import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./
 import { createPluginRuntime } from "./runtime/index.js";
 import { setActivePluginRegistry } from "./runtime.js";
 import { validateJsonSchemaValue } from "./schema-validator.js";
+import { verifyPlugin, getSecurityWarnings } from "./plugin-security.js";
 import type {
   ClawdbotPluginDefinition,
   ClawdbotPluginModule,
@@ -280,6 +281,22 @@ export function loadClawdbotPlugins(options: PluginLoadOptions = {}): PluginRegi
         message: record.error,
       });
       continue;
+    }
+
+    // Verify plugin security before loading
+    const pluginRootDir = path.dirname(candidate.source);
+    const verification = verifyPlugin(candidate.source, pluginRootDir);
+    if (!verification.verified) {
+      const warnings = getSecurityWarnings(verification);
+      for (const warning of warnings) {
+        logger.warn(`[plugins] ${pluginId}: ${warning}`);
+      }
+      registry.diagnostics.push({
+        level: "warn",
+        pluginId,
+        source: candidate.source,
+        message: `Unverified plugin (${verification.source}): ${verification.reason ?? "unknown reason"}`,
+      });
     }
 
     let mod: ClawdbotPluginModule | null = null;

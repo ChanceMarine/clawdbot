@@ -17,8 +17,26 @@ export type WideAreaDiscoveryConfig = {
   enabled?: boolean;
 };
 
+/**
+ * mDNS/Bonjour advertisement mode controlling information disclosure.
+ * - "disabled": No mDNS advertisement.
+ * - "minimal": Only essential discovery info (role, gateway port). Default.
+ * - "full": All details including paths and SSH ports (legacy behavior).
+ */
+export type BonjourDiscoveryMode = "full" | "minimal" | "disabled";
+
+export type BonjourDiscoveryConfig = {
+  /**
+   * Controls how much information is broadcast via mDNS/Bonjour.
+   * Defaults to "minimal" for security (reduces network information disclosure).
+   */
+  mode?: BonjourDiscoveryMode;
+};
+
 export type DiscoveryConfig = {
   wideArea?: WideAreaDiscoveryConfig;
+  /** mDNS/Bonjour local network advertisement settings. */
+  bonjour?: BonjourDiscoveryConfig;
 };
 
 export type CanvasHostConfig = {

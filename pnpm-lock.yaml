@@ -9,6 +9,11 @@ overrides:
   hono: 4.11.4
   tar: 7.5.4
 
+patchedDependencies:
+  '@mariozechner/pi-coding-agent@0.49.3':
+    hash: f05e50a1e1bebf060512dbf1ed2fb49fd9598b52052cd58f9f70a36cb3ae3f4a
+    path: patches/@mariozechner__pi-coding-agent@0.49.3.patch
+
 importers:
 
   .:
@@ -45,7 +50,7 @@ importers:
         version: 0.49.3(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-coding-agent':
         specifier: 0.49.3
-        version: 0.49.3(ws@8.19.0)(zod@4.3.6)
+        version: 0.49.3(patch_hash=f05e50a1e1bebf060512dbf1ed2fb49fd9598b52052cd58f9f70a36cb3ae3f4a)(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-tui':
         specifier: 0.49.3
         version: 0.49.3
@@ -6456,7 +6461,7 @@ snapshots:
       - ws
       - zod
 
-  '@mariozechner/pi-coding-agent@0.49.3(ws@8.19.0)(zod@4.3.6)':
+  '@mariozechner/pi-coding-agent@0.49.3(patch_hash=f05e50a1e1bebf060512dbf1ed2fb49fd9598b52052cd58f9f70a36cb3ae3f4a)(ws@8.19.0)(zod@4.3.6)':
     dependencies:
       '@mariozechner/clipboard': 0.3.0
       '@mariozechner/jiti': 2.6.5
@@ -8385,7 +8390,7 @@ snapshots:
       '@lydell/node-pty': 1.2.0-beta.3
       '@mariozechner/pi-agent-core': 0.49.3(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-ai': 0.49.3(ws@8.19.0)(zod@4.3.6)
-      '@mariozechner/pi-coding-agent': 0.49.3(ws@8.19.0)(zod@4.3.6)
+      '@mariozechner/pi-coding-agent': 0.49.3(patch_hash=f05e50a1e1bebf060512dbf1ed2fb49fd9598b52052cd58f9f70a36cb3ae3f4a)(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-tui': 0.49.3
       '@mozilla/readability': 0.6.0
       '@sinclair/typebox': 0.34.47

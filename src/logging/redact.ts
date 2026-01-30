@@ -34,6 +34,27 @@ const DEFAULT_REDACT_PATTERNS: string[] = [
   String.raw`\b(pplx-[A-Za-z0-9_-]{10,})\b`,
   String.raw`\b(npm_[A-Za-z0-9]{10,})\b`,
   String.raw`\b(\d{6,}:[A-Za-z0-9_-]{20,})\b`,
+
+  // Phone numbers (international format with country code).
+  // Matches: +1234567890, +1-234-567-8901, +1 234 567 8901, +1.234.567.8901
+  String.raw`\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}`,
+  // US phone numbers without country code.
+  // Matches: (123) 456-7890, 123-456-7890, 123.456.7890, 1234567890
+  String.raw`\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}`,
+
+  // User IDs in common formats.
+  // Telegram user IDs (numeric, typically 9-10 digits).
+  String.raw`"(?:userId|user_id|telegramId|telegram_id|chatId|chat_id|from_id|senderId|sender_id)"\s*:\s*(\d{5,15})`,
+  // Discord user IDs (snowflakes, 17-19 digits).
+  String.raw`"(?:userId|user_id|discordId|discord_id|authorId|author_id)"\s*:\s*"?(\d{17,19})"?`,
+  // Signal user IDs (UUIDs).
+  String.raw`"(?:userId|user_id|signalId|signal_id|sourceUuid|source_uuid)"\s*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"`,
+  // WhatsApp JIDs (phone@s.whatsapp.net format).
+  String.raw`(\d{10,15})@(?:s\.whatsapp\.net|g\.us)`,
+  // Generic numeric user/chat IDs in JSON (5+ digits to avoid false positives).
+  String.raw`"(?:from|to|sender|recipient|peer|contact)"\s*:\s*"?(\d{5,15})"?`,
+  // Email addresses (common PII).
+  String.raw`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`,
 ];
 
 type RedactOptions = {

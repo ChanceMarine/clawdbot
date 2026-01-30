@@ -116,6 +116,11 @@ export type MsgContext = {
    * Used for hook confirmation messages like "Session context saved to memory".
    */
   HookMessages?: string[];
+  /**
+   * If true, this message is hidden from the UI but visible to the AI.
+   * Used for reaction messages that the user already sees visually.
+   */
+  HiddenMessage?: boolean;
 };
 
 export type FinalizedMsgContext = Omit<MsgContext, "CommandAuthorized"> & {

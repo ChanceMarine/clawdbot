@@ -172,7 +172,7 @@ export async function authorizeGatewayConnect(params: {
     if (!connectAuth?.token) {
       return { ok: false, reason: "token_missing" };
     }
-    if (connectAuth.token !== auth.token) {
+    if (!safeEqual(connectAuth.token, auth.token)) {
       return { ok: false, reason: "token_mismatch" };
     }
     return { ok: true, method: "token" };

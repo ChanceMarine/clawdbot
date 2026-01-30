@@ -14,6 +14,12 @@ import {
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { deriveSessionMetaPatch } from "./metadata.js";
 import { mergeSessionEntry, type SessionEntry } from "./types.js";
+import {
+  decryptSessionData,
+  encryptSessionData,
+  isEncrypted,
+  isSessionEncryptionEnabled,
+} from "./encryption.js";
 
 // ============================================================================
 // Session Store Cache with TTL Support
@@ -117,7 +123,11 @@ export function loadSessionStore(
   let store: Record<string, SessionEntry> = {};
   let mtimeMs = getFileMtimeMs(storePath);
   try {
-    const raw = fs.readFileSync(storePath, "utf-8");
+    let raw = fs.readFileSync(storePath, "utf-8");
+    // Decrypt if encrypted
+    if (isEncrypted(raw)) {
+      raw = decryptSessionData(raw);
+    }
     const parsed = JSON5.parse(raw);
     if (isSessionStoreRecord(parsed)) {
       store = parsed as Record<string, SessionEntry>;
@@ -185,12 +195,14 @@ async function saveSessionStoreUnlocked(
 
   await fs.promises.mkdir(path.dirname(storePath), { recursive: true });
   const json = JSON.stringify(store, null, 2);
+  // Encrypt session data if encryption is enabled
+  const data = isSessionEncryptionEnabled() ? encryptSessionData(json) : json;
 
   // Windows: avoid atomic rename swaps (can be flaky under concurrent access).
   // We serialize writers via the session-store lock instead.
   if (process.platform === "win32") {
     try {
-      await fs.promises.writeFile(storePath, json, "utf-8");
+      await fs.promises.writeFile(storePath, data, "utf-8");
     } catch (err) {
       const code =
         err && typeof err === "object" && "code" in err
@@ -204,7 +216,7 @@ async function saveSessionStoreUnlocked(
 
   const tmp = `${storePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    await fs.promises.writeFile(tmp, json, { mode: 0o600, encoding: "utf-8" });
+    await fs.promises.writeFile(tmp, data, { mode: 0o600, encoding: "utf-8" });
     await fs.promises.rename(tmp, storePath);
     // Ensure permissions are set even if rename loses them
     await fs.promises.chmod(storePath, 0o600);
@@ -219,7 +231,7 @@ async function saveSessionStoreUnlocked(
       // Best-effort: try a direct write (recreating the parent dir), otherwise ignore.
       try {
         await fs.promises.mkdir(path.dirname(storePath), { recursive: true });
-        await fs.promises.writeFile(storePath, json, { mode: 0o600, encoding: "utf-8" });
+        await fs.promises.writeFile(storePath, data, { mode: 0o600, encoding: "utf-8" });
         await fs.promises.chmod(storePath, 0o600);
       } catch (err2) {
         const code2 =

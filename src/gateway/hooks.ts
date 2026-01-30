@@ -53,8 +53,17 @@ export function extractHookToken(req: IncomingMessage, url: URL): string | undef
       ? req.headers["x-clawdbot-token"].trim()
       : "";
   if (headerToken) return headerToken;
+  // Security: Query parameter tokens are deprecated and no longer supported.
+  // Tokens in URLs can leak via server logs, browser history, and referrer headers.
+  // Use Authorization header (Bearer <token>) or x-clawdbot-token header instead.
   const queryToken = url.searchParams.get("token");
-  if (queryToken) return queryToken.trim();
+  if (queryToken) {
+    // Log deprecation warning but do NOT accept the token for security reasons.
+    console.warn(
+      "[hooks] SECURITY: Query parameter token rejected. Use Authorization header or x-clawdbot-token header instead.",
+    );
+    return undefined;
+  }
   return undefined;
 }
 

@@ -1,4 +1,4 @@
-import { startGatewayBonjourAdvertiser } from "../infra/bonjour.js";
+import { type BonjourMode, startGatewayBonjourAdvertiser } from "../infra/bonjour.js";
 import { pickPrimaryTailnetIPv4, pickPrimaryTailnetIPv6 } from "../infra/tailnet.js";
 import { WIDE_AREA_DISCOVERY_DOMAIN, writeWideAreaGatewayZone } from "../infra/widearea-dns.js";
 import {
@@ -13,6 +13,8 @@ export async function startGatewayDiscovery(params: {
   gatewayTls?: { enabled: boolean; fingerprintSha256?: string };
   canvasPort?: number;
   wideAreaDiscoveryEnabled: boolean;
+  /** mDNS/Bonjour advertisement mode. Defaults to "minimal" for security. */
+  bonjourMode?: BonjourMode;
   logDiscovery: { info: (msg: string) => void; warn: (msg: string) => void };
 }) {
   let bonjourStop: (() => Promise<void>) | null = null;
@@ -36,6 +38,8 @@ export async function startGatewayDiscovery(params: {
       sshPort,
       tailnetDns,
       cliPath: resolveBonjourCliPath(),
+      // Security: default to minimal mode to reduce information disclosure
+      mode: params.bonjourMode ?? "minimal",
     });
     bonjourStop = bonjour.stop;
   } catch (err) {

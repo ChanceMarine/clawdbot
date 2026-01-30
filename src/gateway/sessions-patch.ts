@@ -55,6 +55,21 @@ function normalizeExecAsk(raw: string): "off" | "on-miss" | "always" | undefined
   return undefined;
 }
 
+function normalizePermissionMode(
+  raw: string,
+): "plan" | "ask" | "auto" | "dangerously-skip" | undefined {
+  const normalized = raw.trim().toLowerCase();
+  if (
+    normalized === "plan" ||
+    normalized === "ask" ||
+    normalized === "auto" ||
+    normalized === "dangerously-skip"
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
 export async function applySessionsPatchToStore(params: {
   cfg: ClawdbotConfig;
   store: Record<string, SessionEntry>;
@@ -306,6 +321,19 @@ export async function applySessionsPatchToStore(params: {
         return invalid('invalid groupActivation (use "mention"|"always")');
       }
       next.groupActivation = normalized;
+    }
+  }
+
+  if ("permissionMode" in patch) {
+    const raw = patch.permissionMode;
+    if (raw === null) {
+      delete next.permissionMode;
+    } else if (raw !== undefined) {
+      const normalized = normalizePermissionMode(String(raw));
+      if (!normalized) {
+        return invalid('invalid permissionMode (use "plan"|"ask"|"auto"|"dangerously-skip")');
+      }
+      next.permissionMode = normalized;
     }
   }
 

@@ -8,6 +8,7 @@ import { isWebchatClient } from "../../utils/message-channel.js";
 
 import type { ResolvedGatewayAuth } from "../auth.js";
 import { isLoopbackAddress } from "../net.js";
+import { getGlobalRateLimiter } from "../rate-limiter.js";
 import { getHandshakeTimeoutMs } from "../server-constants.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "../server-methods/types.js";
 import { formatError } from "../server-utils.js";
@@ -17,6 +18,69 @@ import { attachGatewayWsMessageHandler } from "./ws-connection/message-handler.j
 import type { GatewayWsClient } from "./ws-types.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
+
+function validateWebSocketOrigin(params: {
+  origin: string | undefined;
+  remoteAddr: string | undefined;
+  allowedOrigins?: string[];
+}): { valid: boolean; reason?: string } {
+  const { origin, remoteAddr, allowedOrigins } = params;
+
+  // Always allow loopback connections (local development)
+  if (
+    remoteAddr &&
+    (remoteAddr === "127.0.0.1" ||
+      remoteAddr === "::1" ||
+      remoteAddr.startsWith("127.") ||
+      remoteAddr.startsWith("::ffff:127."))
+  ) {
+    return { valid: true };
+  }
+
+  // Non-browser clients may not send origin - allow these
+  if (!origin) {
+    return { valid: true };
+  }
+
+  // Parse and validate origin
+  let originHost: string;
+  try {
+    const url = new URL(origin);
+    originHost = url.hostname;
+  } catch {
+    return { valid: false, reason: "invalid_origin_format" };
+  }
+
+  // Allow localhost origins
+  if (originHost === "localhost" || originHost === "127.0.0.1" || originHost === "::1") {
+    return { valid: true };
+  }
+
+  // Allow Tailscale origins (*.ts.net)
+  if (originHost.endsWith(".ts.net")) {
+    return { valid: true };
+  }
+
+  // If no allowlist configured, reject unknown origins for security
+  if (!allowedOrigins || allowedOrigins.length === 0) {
+    return { valid: false, reason: "origin_not_in_allowlist" };
+  }
+
+  // Check allowlist
+  for (const allowed of allowedOrigins) {
+    if (origin === allowed || originHost === allowed) {
+      return { valid: true };
+    }
+    if (allowed.startsWith("*.")) {
+      const domain = allowed.slice(2);
+      if (originHost === domain || originHost.endsWith(`.${domain}`)) {
+        return { valid: true };
+      }
+    }
+  }
+
+  return { valid: false, reason: "origin_not_allowed" };
+}
 
 export function attachGatewayWsConnectionHandler(params: {
   wss: WebSocketServer;
@@ -73,6 +137,34 @@ export function attachGatewayWsConnectionHandler(params: {
     const requestOrigin = headerValue(upgradeReq.headers.origin);
     const requestUserAgent = headerValue(upgradeReq.headers["user-agent"]);
     const forwardedFor = headerValue(upgradeReq.headers["x-forwarded-for"]);
+
+    // Rate limit check for new connections
+    const clientIp = forwardedFor?.split(",")[0]?.trim() || remoteAddr || "unknown";
+    const rateLimiter = getGlobalRateLimiter();
+    const connectionCheck = rateLimiter.checkConnection(clientIp);
+
+    if (!connectionCheck.allowed) {
+      logWsControl.warn(`Rate limited connection from ${clientIp}: ${connectionCheck.reason}`, {
+        retryAfterMs: connectionCheck.retryAfterMs,
+      });
+      socket.close(1008, connectionCheck.reason ?? "rate limited");
+      return;
+    }
+
+    // Origin validation to prevent cross-site WebSocket hijacking
+    const originCheck = validateWebSocketOrigin({
+      origin: requestOrigin,
+      remoteAddr,
+      allowedOrigins: [], // Could be made configurable
+    });
+
+    if (!originCheck.valid) {
+      logWsControl.warn(
+        `Origin rejected: ${requestOrigin} from ${remoteAddr}: ${originCheck.reason}`,
+      );
+      socket.close(1008, originCheck.reason ?? "origin not allowed");
+      return;
+    }
 
     const canvasHostPortForWs = canvasHostServerPort ?? (canvasHostEnabled ? port : undefined);
     const canvasHostOverride =
@@ -196,6 +288,9 @@ export function attachGatewayWsConnectionHandler(params: {
           context.nodeUnsubscribeAll(nodeId);
         }
       }
+      // In the close handler
+      rateLimiter.removeConnection(connId);
+
       logWs("out", "close", {
         connId,
         code,

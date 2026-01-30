@@ -20,6 +20,128 @@ import {
 } from "../../browser/client-actions.js";
 import crypto from "node:crypto";
 
+// ============================================================================
+// URL Navigation Security
+// ============================================================================
+
+/**
+ * Default list of sensitive domains that are blocked for browser navigation.
+ * These include banking, email, and other sensitive services.
+ * Can be overridden via config allowlist.
+ */
+const DEFAULT_BLOCKED_DOMAINS = [
+  // Banking
+  "chase.com",
+  "bankofamerica.com",
+  "wellsfargo.com",
+  "citibank.com",
+  "usbank.com",
+  "capitalone.com",
+  "ally.com",
+  "schwab.com",
+  "fidelity.com",
+  "vanguard.com",
+  "tdameritrade.com",
+  "etrade.com",
+  "robinhood.com",
+  "coinbase.com",
+  "binance.com",
+  "kraken.com",
+  // Email providers
+  "mail.google.com",
+  "outlook.live.com",
+  "outlook.office.com",
+  "mail.yahoo.com",
+  "protonmail.com",
+  "proton.me",
+  "tutanota.com",
+  "fastmail.com",
+  // Password managers
+  "1password.com",
+  "lastpass.com",
+  "bitwarden.com",
+  "dashlane.com",
+  // Healthcare
+  "myuhc.com",
+  "anthem.com",
+  "cigna.com",
+  "aetna.com",
+  // Government
+  "irs.gov",
+  "ssa.gov",
+  "login.gov",
+];
+
+export type BrowserUrlSecurityConfig = {
+  /** Domains that are always allowed (overrides blocklist) */
+  allowedDomains?: string[];
+  /** Additional domains to block beyond the default list */
+  blockedDomains?: string[];
+  /** If true, disables the default blocklist (not recommended) */
+  disableDefaultBlocklist?: boolean;
+};
+
+/**
+ * Validates a URL for browser navigation security.
+ * - Always allows localhost/127.0.0.1
+ * - Blocks known sensitive domains by default
+ * - Can be configured via allowlist in config
+ *
+ * @param url The URL to validate
+ * @param config Optional security configuration
+ * @returns Object with isAllowed boolean and reason string
+ */
+export function validateBrowserNavigationUrl(
+  url: string,
+  config?: BrowserUrlSecurityConfig,
+): { isAllowed: boolean; reason: string } {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return { isAllowed: false, reason: `Invalid URL: ${url}` };
+  }
+
+  const hostname = parsedUrl.hostname.toLowerCase();
+
+  // Always allow localhost and loopback addresses
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".localhost")
+  ) {
+    return { isAllowed: true, reason: "Localhost is always allowed" };
+  }
+
+  // Check if domain is in the explicit allowlist (overrides blocklist)
+  const allowedDomains = config?.allowedDomains ?? [];
+  for (const allowed of allowedDomains) {
+    const normalizedAllowed = allowed.toLowerCase().trim();
+    if (hostname === normalizedAllowed || hostname.endsWith(`.${normalizedAllowed}`)) {
+      return { isAllowed: true, reason: `Domain ${hostname} is in allowlist` };
+    }
+  }
+
+  // Build the effective blocklist
+  const blockedDomains = config?.disableDefaultBlocklist
+    ? (config?.blockedDomains ?? [])
+    : [...DEFAULT_BLOCKED_DOMAINS, ...(config?.blockedDomains ?? [])];
+
+  // Check if domain is blocked
+  for (const blocked of blockedDomains) {
+    const normalizedBlocked = blocked.toLowerCase().trim();
+    if (hostname === normalizedBlocked || hostname.endsWith(`.${normalizedBlocked}`)) {
+      return {
+        isAllowed: false,
+        reason: `Domain ${hostname} is blocked for security (matches ${blocked}). Add to browser.navigation.allowedDomains to override.`,
+      };
+    }
+  }
+
+  return { isAllowed: true, reason: "Domain is not in blocklist" };
+}
+
 import { resolveBrowserConfig } from "../../browser/config.js";
 import { DEFAULT_AI_SNAPSHOT_MAX_CHARS } from "../../browser/constants.js";
 import { loadConfig } from "../../config/config.js";
@@ -272,6 +394,8 @@ export function createBrowserTool(opts?: {
   allowedControlUrls?: string[];
   allowedControlHosts?: string[];
   allowedControlPorts?: number[];
+  /** URL security configuration for navigation */
+  urlSecurity?: BrowserUrlSecurityConfig;
 }): AnyAgentTool {
   const targetDefault = opts?.defaultControlUrl ? "sandbox" : "host";
   const hostHint =
@@ -439,6 +563,11 @@ export function createBrowserTool(opts?: {
           const targetUrl = readStringParam(params, "targetUrl", {
             required: true,
           });
+          // Validate URL for security before opening
+          const openUrlValidation = validateBrowserNavigationUrl(targetUrl, opts?.urlSecurity);
+          if (!openUrlValidation.isAllowed) {
+            throw new Error(`Browser navigation blocked: ${openUrlValidation.reason}`);
+          }
           if (proxyRequest) {
             const result = await proxyRequest({
               method: "POST",
@@ -618,6 +747,11 @@ export function createBrowserTool(opts?: {
           const targetUrl = readStringParam(params, "targetUrl", {
             required: true,
           });
+          // Validate URL for security before navigating
+          const navUrlValidation = validateBrowserNavigationUrl(targetUrl, opts?.urlSecurity);
+          if (!navUrlValidation.isAllowed) {
+            throw new Error(`Browser navigation blocked: ${navUrlValidation.reason}`);
+          }
           const targetId = readStringParam(params, "targetId");
           if (proxyRequest) {
             const result = await proxyRequest({

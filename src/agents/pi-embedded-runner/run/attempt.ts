@@ -227,6 +227,8 @@ export async function runEmbeddedAttempt(
           replyToMode: params.replyToMode,
           hasRepliedRef: params.hasRepliedRef,
           modelHasVision,
+          runId: params.runId,
+          permissionMode: params.permissionMode,
         });
     const tools = sanitizeToolsForGoogle({ tools: toolsRaw, provider: params.provider });
     logToolSchemasForGoogle({ tools, provider: params.provider });
@@ -306,6 +308,7 @@ export async function runEmbeddedAttempt(
         channel: runtimeChannel,
         capabilities: runtimeCapabilities,
         channelActions,
+        permissionMode: params.permissionMode,
       },
     });
     const isDefaultAgent = sessionAgentId === defaultAgentId;

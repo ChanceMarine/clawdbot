@@ -18,6 +18,11 @@ import {
 import { listChannelAgentTools } from "./channel-tools.js";
 import { createClawdbotTools } from "./clawdbot-tools.js";
 import type { ModelAuthMode } from "./model-auth.js";
+import {
+  wrapToolWithPermissionCheck,
+  type PermissionMode,
+  type PermissionModeContext,
+} from "./permission-mode.js";
 import { wrapToolWithAbortSignal } from "./pi-tools.abort.js";
 import {
   filterToolsByPolicy,
@@ -145,6 +150,10 @@ export function createClawdbotCodingTools(options?: {
   hasRepliedRef?: { value: boolean };
   /** If true, the model has native vision capability */
   modelHasVision?: boolean;
+  /** Run ID for emitting agent events (e.g., bubble breaks). */
+  runId?: string;
+  /** Permission mode for file/exec access control */
+  permissionMode?: PermissionMode;
 }): AnyAgentTool[] {
   const execToolName = "exec";
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
@@ -204,6 +213,14 @@ export function createClawdbotCodingTools(options?: {
       allowModels: applyPatchConfig?.allowModels,
     });
 
+  // Permission mode context for file tool enforcement
+  const permissionContext: PermissionModeContext = {
+    mode: options?.permissionMode,
+    homeDir: workspaceRoot, // Home workspace is always accessible
+    sessionKey: options?.sessionKey,
+    runId: options?.runId,
+  };
+
   const base = (codingTools as unknown as AnyAgentTool[]).flatMap((tool) => {
     if (tool.name === readTool.name) {
       if (sandboxRoot) {
@@ -216,14 +233,22 @@ export function createClawdbotCodingTools(options?: {
     if (tool.name === "write") {
       if (sandboxRoot) return [];
       // Wrap with param normalization for Claude Code compatibility
-      return [
-        wrapToolParamNormalization(createWriteTool(workspaceRoot), CLAUDE_PARAM_GROUPS.write),
-      ];
+      // Then wrap with permission mode check
+      const writeTool = wrapToolParamNormalization(
+        createWriteTool(workspaceRoot),
+        CLAUDE_PARAM_GROUPS.write,
+      );
+      return [wrapToolWithPermissionCheck(writeTool, "write", permissionContext)];
     }
     if (tool.name === "edit") {
       if (sandboxRoot) return [];
       // Wrap with param normalization for Claude Code compatibility
-      return [wrapToolParamNormalization(createEditTool(workspaceRoot), CLAUDE_PARAM_GROUPS.edit)];
+      // Then wrap with permission mode check
+      const editTool = wrapToolParamNormalization(
+        createEditTool(workspaceRoot),
+        CLAUDE_PARAM_GROUPS.edit,
+      );
+      return [wrapToolWithPermissionCheck(editTool, "write", permissionContext)];
     }
     return [tool as AnyAgentTool];
   });
@@ -246,6 +271,7 @@ export function createClawdbotCodingTools(options?: {
     approvalRunningNoticeMs:
       options?.exec?.approvalRunningNoticeMs ?? execConfig.approvalRunningNoticeMs,
     notifyOnExit: options?.exec?.notifyOnExit ?? execConfig.notifyOnExit,
+    permissionMode: options?.permissionMode,
     sandbox: sandbox
       ? {
           containerName: sandbox.containerName,
@@ -313,6 +339,7 @@ export function createClawdbotCodingTools(options?: {
       replyToMode: options?.replyToMode,
       hasRepliedRef: options?.hasRepliedRef,
       modelHasVision: options?.modelHasVision,
+      runId: options?.runId,
     }),
   ];
   const coreToolNames = new Set(

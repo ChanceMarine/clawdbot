@@ -57,6 +57,7 @@ export type EmbeddedRunAttemptParams = {
   toolResultFormat?: ToolResultFormat;
   execOverrides?: Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
   bashElevated?: ExecElevatedDefaults;
+  permissionMode?: "plan" | "ask" | "auto" | "dangerously-skip";
   timeoutMs: number;
   runId: string;
   abortSignal?: AbortSignal;

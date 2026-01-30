@@ -262,6 +262,15 @@ export async function initSessionState(params: {
     modelOverride: persistedModelOverride ?? baseEntry?.modelOverride,
     providerOverride: persistedProviderOverride ?? baseEntry?.providerOverride,
     sendPolicy: baseEntry?.sendPolicy,
+    // Preserve permission mode even when session is stale/reset (per-session override).
+    // Read from original entry since baseEntry may be undefined on session reset.
+    permissionMode: entry?.permissionMode,
+    // Preserve exec overrides even when session is stale/reset.
+    execHost: entry?.execHost,
+    execSecurity: entry?.execSecurity,
+    execAsk: entry?.execAsk,
+    execNode: entry?.execNode,
+    elevatedLevel: entry?.elevatedLevel,
     queueMode: baseEntry?.queueMode,
     queueDebounceMs: baseEntry?.queueDebounceMs,
     queueCap: baseEntry?.queueCap,

@@ -22,6 +22,8 @@ export type RuntimeInfoInput = {
   /** Supported message actions for the current channel (e.g., react, edit, unsend) */
   channelActions?: string[];
   repoRoot?: string;
+  /** Permission mode governing file/exec access (plan, ask, auto, dangerously-skip) */
+  permissionMode?: string;
 };
 
 export type SystemPromptRuntimeParams = {

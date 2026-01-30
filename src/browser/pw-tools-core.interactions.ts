@@ -7,6 +7,84 @@ import {
 } from "./pw-session.js";
 import { normalizeTimeoutMs, requireRef, toAIFriendlyError } from "./pw-tools-core.shared.js";
 
+// ============================================================================
+// Browser Evaluate Security
+// ============================================================================
+
+/** Maximum allowed length for evaluated function code */
+const EVALUATE_MAX_CODE_LENGTH = 50_000;
+
+/**
+ * Patterns that are blocked in browser evaluate functions.
+ * These patterns could be used for:
+ * - Exfiltrating sensitive data
+ * - Establishing persistent connections
+ * - Credential theft
+ */
+const BLOCKED_EVALUATE_PATTERNS = [
+  // Network exfiltration
+  { pattern: /fetch\s*\(/i, reason: "fetch() calls are not allowed in evaluate" },
+  { pattern: /XMLHttpRequest/i, reason: "XMLHttpRequest is not allowed in evaluate" },
+  { pattern: /WebSocket/i, reason: "WebSocket is not allowed in evaluate" },
+  { pattern: /navigator\.sendBeacon/i, reason: "sendBeacon is not allowed in evaluate" },
+  // Credential access
+  { pattern: /document\.cookie/i, reason: "document.cookie access is not allowed in evaluate" },
+  { pattern: /localStorage/i, reason: "localStorage access is not allowed in evaluate" },
+  { pattern: /sessionStorage/i, reason: "sessionStorage access is not allowed in evaluate" },
+  { pattern: /indexedDB/i, reason: "indexedDB access is not allowed in evaluate" },
+  // Dynamic code execution that could bypass checks
+  { pattern: /\beval\s*\(/i, reason: "Nested eval() is not allowed in evaluate" },
+  { pattern: /new\s+Function\s*\(/i, reason: "new Function() is not allowed in evaluate" },
+  // Worker creation (could be used for persistence)
+  { pattern: /new\s+Worker\s*\(/i, reason: "Worker creation is not allowed in evaluate" },
+  { pattern: /ServiceWorker/i, reason: "ServiceWorker access is not allowed in evaluate" },
+];
+
+/**
+ * Validates code before browser evaluation.
+ *
+ * SECURITY NOTE: The evaluateViaPlaywright function uses eval() to execute
+ * user-provided code in the browser context. This is intentional functionality
+ * for browser automation, but poses security risks:
+ *
+ * 1. Code executes with full page privileges
+ * 2. Can access DOM, cookies, storage APIs
+ * 3. Can make network requests
+ *
+ * This validation function provides defense-in-depth by blocking known
+ * dangerous patterns, but cannot guarantee complete safety. The browser
+ * evaluate feature should only be exposed to trusted users.
+ *
+ * @param code The code to validate
+ * @returns Object with isValid boolean and reason string
+ */
+export function validateEvaluateCode(code: string): { isValid: boolean; reason: string } {
+  if (typeof code !== "string") {
+    return { isValid: false, reason: "Code must be a string" };
+  }
+
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return { isValid: false, reason: "Code cannot be empty" };
+  }
+
+  if (trimmed.length > EVALUATE_MAX_CODE_LENGTH) {
+    return {
+      isValid: false,
+      reason: `Code exceeds maximum length of ${EVALUATE_MAX_CODE_LENGTH} characters`,
+    };
+  }
+
+  // Check for blocked patterns
+  for (const { pattern, reason } of BLOCKED_EVALUATE_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { isValid: false, reason };
+    }
+  }
+
+  return { isValid: true, reason: "Code validation passed" };
+}
+
 export async function highlightViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
@@ -208,6 +286,19 @@ export async function fillFormViaPlaywright(opts: {
   }
 }
 
+/**
+ * Evaluates JavaScript code in the browser context.
+ *
+ * SECURITY WARNING: This function executes arbitrary code in the browser.
+ * Input validation is performed to block known dangerous patterns, but
+ * this feature should only be exposed to trusted users.
+ *
+ * Blocked operations include:
+ * - Network requests (fetch, XMLHttpRequest, WebSocket)
+ * - Cookie/storage access
+ * - Nested eval/Function
+ * - Worker creation
+ */
 export async function evaluateViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
@@ -216,6 +307,13 @@ export async function evaluateViaPlaywright(opts: {
 }): Promise<unknown> {
   const fnText = String(opts.fn ?? "").trim();
   if (!fnText) throw new Error("function is required");
+
+  // Validate code for security before execution
+  const codeValidation = validateEvaluateCode(fnText);
+  if (!codeValidation.isValid) {
+    throw new Error(`Browser evaluate blocked: ${codeValidation.reason}`);
+  }
+
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
   restoreRoleRefsForTarget({ cdpUrl: opts.cdpUrl, targetId: opts.targetId, page });

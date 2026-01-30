@@ -11,6 +11,20 @@ export type GatewayBonjourAdvertiser = {
   stop: () => Promise<void>;
 };
 
+/**
+ * mDNS advertisement mode controlling information disclosure on local network.
+ *
+ * Security implications:
+ * - "disabled": No mDNS advertisement. Most secure but prevents local discovery.
+ * - "minimal": Only broadcasts essential discovery info (role, gateway port).
+ *              Recommended for security-conscious deployments.
+ * - "full": Broadcasts all details including filesystem paths, SSH ports, and
+ *           detailed hostnames. Use only on trusted networks.
+ *
+ * Default is "minimal" to reduce attack surface from network reconnaissance.
+ */
+export type BonjourMode = "full" | "minimal" | "disabled";
+
 export type GatewayBonjourAdvertiseOpts = {
   instanceName?: string;
   gatewayPort: number;
@@ -20,6 +34,11 @@ export type GatewayBonjourAdvertiseOpts = {
   canvasPort?: number;
   tailnetDns?: string;
   cliPath?: string;
+  /**
+   * Controls how much information is broadcast via mDNS.
+   * Defaults to "minimal" for security (reduces information disclosure).
+   */
+  mode?: BonjourMode;
 };
 
 function isDisabledByEnv() {
@@ -75,6 +94,14 @@ function serviceSummary(label: string, svc: BonjourService): string {
 export async function startGatewayBonjourAdvertiser(
   opts: GatewayBonjourAdvertiseOpts,
 ): Promise<GatewayBonjourAdvertiser> {
+  // Check mode first - "disabled" takes precedence over env check
+  const bonjourMode: BonjourMode = opts.mode ?? "minimal";
+
+  if (bonjourMode === "disabled") {
+    logDebug("bonjour: disabled via mode option");
+    return { stop: async () => {} };
+  }
+
   if (isDisabledByEnv()) {
     return { stop: async () => {} };
   }
@@ -97,29 +124,63 @@ export async function startGatewayBonjourAdvertiser(
       : `${hostname} (Clawdbot)`;
   const displayName = prettifyInstanceName(instanceName);
 
-  const txtBase: Record<string, string> = {
+  // Minimal mode - only essential info for service discovery
+  // Security: reduces information disclosure on local network
+  const txtMinimal: Record<string, string> = {
     role: "gateway",
     gatewayPort: String(opts.gatewayPort),
+  };
+
+  // Full mode - includes all details (legacy behavior)
+  // Security warning: exposes filesystem paths (cliPath), SSH port, and hostname
+  // which can aid network reconnaissance and attack surface mapping
+  const txtFull: Record<string, string> = {
+    ...txtMinimal,
     lanHost: `${hostname}.local`,
     displayName,
   };
+
+  // Add TLS info (safe for both modes - doesn't disclose sensitive paths)
   if (opts.gatewayTlsEnabled) {
-    txtBase.gatewayTls = "1";
+    txtMinimal.gatewayTls = "1";
+    txtFull.gatewayTls = "1";
     if (opts.gatewayTlsFingerprintSha256) {
-      txtBase.gatewayTlsSha256 = opts.gatewayTlsFingerprintSha256;
+      txtMinimal.gatewayTlsSha256 = opts.gatewayTlsFingerprintSha256;
+      txtFull.gatewayTlsSha256 = opts.gatewayTlsFingerprintSha256;
     }
   }
+
+  // Canvas port - safe for both modes (service discovery info)
   if (typeof opts.canvasPort === "number" && opts.canvasPort > 0) {
-    txtBase.canvasPort = String(opts.canvasPort);
-  }
-  if (typeof opts.tailnetDns === "string" && opts.tailnetDns.trim()) {
-    txtBase.tailnetDns = opts.tailnetDns.trim();
-  }
-  if (typeof opts.cliPath === "string" && opts.cliPath.trim()) {
-    txtBase.cliPath = opts.cliPath.trim();
+    txtMinimal.canvasPort = String(opts.canvasPort);
+    txtFull.canvasPort = String(opts.canvasPort);
   }
 
+  // Full mode only - these fields disclose sensitive information:
+  // - tailnetDns: reveals Tailscale network membership
+  // - cliPath: filesystem path disclosure
+  if (typeof opts.tailnetDns === "string" && opts.tailnetDns.trim()) {
+    txtFull.tailnetDns = opts.tailnetDns.trim();
+  }
+  if (typeof opts.cliPath === "string" && opts.cliPath.trim()) {
+    // Security: cliPath reveals filesystem structure - full mode only
+    txtFull.cliPath = opts.cliPath.trim();
+  }
+
+  // Select TXT records based on mode
+  const txtBase = bonjourMode === "minimal" ? txtMinimal : txtFull;
+
   const services: Array<{ label: string; svc: BonjourService }> = [];
+
+  // Build service TXT records
+  // Security: sshPort is only included in full mode (aids attack surface mapping)
+  const serviceTxt: Record<string, string> = {
+    ...txtBase,
+    transport: "gateway",
+  };
+  if (bonjourMode === "full") {
+    serviceTxt.sshPort = String(opts.sshPort ?? 22);
+  }
 
   const gateway = responder.createService({
     name: safeServiceName(instanceName),
@@ -128,11 +189,7 @@ export async function startGatewayBonjourAdvertiser(
     port: opts.gatewayPort,
     domain: "local",
     hostname,
-    txt: {
-      ...txtBase,
-      sshPort: String(opts.sshPort ?? 22),
-      transport: "gateway",
-    },
+    txt: serviceTxt,
   });
   services.push({
     label: "gateway",
@@ -147,9 +204,9 @@ export async function startGatewayBonjourAdvertiser(
   }
 
   logDebug(
-    `bonjour: starting (hostname=${hostname}, instance=${JSON.stringify(
+    `bonjour: starting (mode=${bonjourMode}, hostname=${hostname}, instance=${JSON.stringify(
       safeServiceName(instanceName),
-    )}, gatewayPort=${opts.gatewayPort}, sshPort=${opts.sshPort ?? 22})`,
+    )}, gatewayPort=${opts.gatewayPort}${bonjourMode === "full" ? `, sshPort=${opts.sshPort ?? 22}` : ""})`,
   );
 
   for (const { label, svc } of services) {

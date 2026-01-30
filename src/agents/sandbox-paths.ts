@@ -2,6 +2,67 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+// Blocklist of sensitive file paths that should NEVER be readable.
+// These patterns protect credentials, keys, and other sensitive data.
+const SENSITIVE_PATH_PATTERNS = [
+  // SSH
+  /\.ssh\//i,
+  /id_rsa/i,
+  /id_ed25519/i,
+  /id_ecdsa/i,
+  /known_hosts/i,
+  // AWS
+  /\.aws\/credentials/i,
+  /\.aws\/config/i,
+  // GCP
+  /\.config\/gcloud/i,
+  /application_default_credentials\.json/i,
+  // Azure
+  /\.azure\//i,
+  // Kubernetes
+  /\.kube\/config/i,
+  // GPG
+  /\.gnupg\//i,
+  // Password managers
+  /\.password-store\//i,
+  // Shell history (could contain secrets)
+  /\.(bash|zsh|fish)_history/i,
+  // Environment files
+  /\.env$/i,
+  /\.env\.local/i,
+  /\.env\.production/i,
+  // Clawdbot credentials
+  /\.clawdbot\/credentials/i,
+  /\.clawdbot\/identity/i,
+  /auth-profiles\.json/i,
+  // NPM tokens
+  /\.npmrc/i,
+  // Git credentials
+  /\.git-credentials/i,
+  /\.gitconfig/i, // Can contain credentials
+  // Docker
+  /\.docker\/config\.json/i,
+];
+
+/**
+ * Check if a file path matches any sensitive path pattern.
+ * This protects credentials, keys, and other sensitive data from being read.
+ */
+export function isSensitivePath(filePath: string): boolean {
+  const normalized = filePath.toLowerCase();
+  return SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Assert that a file path is not sensitive. Throws if the path matches
+ * any sensitive path pattern.
+ */
+export function assertNotSensitivePath(filePath: string): void {
+  if (isSensitivePath(filePath)) {
+    throw new Error(`Access denied: Cannot read sensitive file ${path.basename(filePath)}`);
+  }
+}
+
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
 function normalizeUnicodeSpaces(str: string): string {
@@ -30,6 +91,10 @@ export function resolveSandboxPath(params: { filePath: string; cwd: string; root
   relative: string;
 } {
   const resolved = resolveToCwd(params.filePath, params.cwd);
+
+  // Block access to sensitive credential files
+  assertNotSensitivePath(resolved);
+
   const rootResolved = path.resolve(params.root);
   const relative = path.relative(rootResolved, resolved);
   if (!relative || relative === "") {

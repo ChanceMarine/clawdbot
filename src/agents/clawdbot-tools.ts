@@ -4,7 +4,9 @@ import type { GatewayMessageChannel } from "../utils/message-channel.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import { createAgentsListTool } from "./tools/agents-list-tool.js";
 import { createBrowserTool } from "./tools/browser-tool.js";
+import { createBubbleTool } from "./tools/bubble-tool.js";
 import { createCanvasTool } from "./tools/canvas-tool.js";
+import { createReactTool } from "./tools/react-tool.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { createCronTool } from "./tools/cron-tool.js";
 import { createGatewayTool } from "./tools/gateway-tool.js";
@@ -54,6 +56,8 @@ export function createClawdbotTools(options?: {
   hasRepliedRef?: { value: boolean };
   /** If true, the model has native vision capability */
   modelHasVision?: boolean;
+  /** Run ID for emitting agent events (e.g., bubble breaks). */
+  runId?: string;
 }): AnyAgentTool[] {
   const imageTool = options?.agentDir?.trim()
     ? createImageTool({
@@ -100,6 +104,12 @@ export function createClawdbotTools(options?: {
     createTtsTool({
       agentChannel: options?.agentChannel,
       config: options?.config,
+    }),
+    createBubbleTool({
+      runId: options?.runId,
+    }),
+    createReactTool({
+      runId: options?.runId,
     }),
     createGatewayTool({
       agentSessionKey: options?.agentSessionKey,

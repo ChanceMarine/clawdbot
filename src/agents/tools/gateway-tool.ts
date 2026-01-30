@@ -4,6 +4,35 @@ import { Type } from "@sinclair/typebox";
 
 import type { ClawdbotConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/io.js";
+
+// ============================================================================
+// Security: Logging for sensitive gateway operations
+// ============================================================================
+
+/**
+ * Logs security-sensitive gateway operations for audit purposes.
+ * All config.apply and update.run actions are logged with details.
+ */
+function logSensitiveGatewayAction(params: {
+  action: string;
+  sessionKey?: string;
+  note?: string;
+  timestamp: number;
+  details?: Record<string, unknown>;
+}) {
+  const logEntry = {
+    level: "security",
+    event: "gateway_sensitive_action",
+    action: params.action,
+    sessionKey: params.sessionKey ?? "unknown",
+    note: params.note,
+    timestamp: params.timestamp,
+    timestampIso: new Date(params.timestamp).toISOString(),
+    ...params.details,
+  };
+  // Log to console with security prefix for visibility
+  console.warn(`[SECURITY] Gateway sensitive action: ${params.action}`, JSON.stringify(logEntry));
+}
 import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import { scheduleGatewaySigusr1Restart } from "../../infra/restart.js";
 import {
@@ -186,6 +215,18 @@ export function createGatewayTool(opts?: {
           typeof params.restartDelayMs === "number" && Number.isFinite(params.restartDelayMs)
             ? Math.floor(params.restartDelayMs)
             : undefined;
+        // Log security-sensitive action before execution
+        logSensitiveGatewayAction({
+          action: "config.apply",
+          sessionKey,
+          note,
+          timestamp: Date.now(),
+          details: {
+            baseHash,
+            rawLength: raw.length,
+            restartDelayMs,
+          },
+        });
         const result = await callGatewayTool("config.apply", gatewayOpts, {
           raw,
           baseHash,
@@ -206,6 +247,17 @@ export function createGatewayTool(opts?: {
           typeof params.restartDelayMs === "number" && Number.isFinite(params.restartDelayMs)
             ? Math.floor(params.restartDelayMs)
             : undefined;
+        // Log security-sensitive action before execution
+        logSensitiveGatewayAction({
+          action: "update.run",
+          sessionKey,
+          note,
+          timestamp: Date.now(),
+          details: {
+            restartDelayMs,
+            timeoutMs,
+          },
+        });
         const result = await callGatewayTool("update.run", gatewayOpts, {
           sessionKey,
           note,

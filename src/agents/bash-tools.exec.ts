@@ -127,6 +127,7 @@ export type ExecToolDefaults = {
   approvalRunningNoticeMs?: number;
   sandbox?: BashSandboxConfig;
   elevated?: ExecElevatedDefaults;
+  permissionMode?: "plan" | "ask" | "auto" | "dangerously-skip";
   allowBackground?: boolean;
   scopeKey?: string;
   sessionKey?: string;
@@ -705,6 +706,19 @@ export function createExecTool(
 
       if (!params.command) {
         throw new Error("Provide a command to start.");
+      }
+
+      // Permission mode check - block exec in plan mode
+      const permissionMode = defaults?.permissionMode;
+      if (permissionMode === "plan") {
+        throw new Error(
+          "🔒 Plan mode: exec operations blocked. Switch to Ask or Auto mode to run commands.",
+        );
+      }
+      if (permissionMode === "ask") {
+        throw new Error(
+          "🔐 Ask mode: exec requires approval. Approve this action or switch to Auto mode.",
+        );
       }
 
       const maxOutput = DEFAULT_MAX_OUTPUT;

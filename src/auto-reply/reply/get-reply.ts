@@ -22,6 +22,10 @@ import { initSessionState } from "./session.js";
 import { applyResetModelOverride } from "./session-reset-model.js";
 import { stageSandboxMedia } from "./stage-sandbox-media.js";
 import { createTypingController } from "./typing.js";
+import {
+  detectPromptInjection,
+  buildInjectionWarningContext,
+} from "../../security/prompt-injection-detector.js";
 
 export async function getReplyFromConfig(
   ctx: MsgContext,
@@ -81,6 +85,23 @@ export async function getReplyFromConfig(
   opts?.onTypingController?.(typing);
 
   const finalized = finalizeInboundContext(ctx);
+
+  // Detect prompt injection in user input before it reaches the AI
+  const userMessage = finalized.BodyForAgent ?? finalized.Body ?? "";
+  const injectionResult = detectPromptInjection(userMessage);
+
+  // Log security warnings for high-risk injection attempts
+  if (injectionResult.riskLevel === "high" || injectionResult.riskLevel === "critical") {
+    console.warn(
+      `[SECURITY] Potential prompt injection detected (${injectionResult.riskLevel}): ${injectionResult.matchedPatterns.join(", ")}`,
+    );
+  }
+
+  // Build warning context if injection risk is medium or higher
+  const injectionWarning =
+    injectionResult.riskLevel !== "none" && injectionResult.riskLevel !== "low"
+      ? buildInjectionWarningContext(injectionResult)
+      : null;
 
   if (!isFastTestEnv) {
     await applyMediaUnderstanding({
@@ -293,5 +314,6 @@ export async function getReplyFromConfig(
     storePath,
     workspaceDir,
     abortedLastRun,
+    injectionWarning,
   });
 }

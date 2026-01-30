@@ -24,6 +24,7 @@ import type { createSubsystemLogger } from "../../../logging/subsystem.js";
 import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-channel.js";
 import type { ResolvedGatewayAuth } from "../../auth.js";
 import { authorizeGatewayConnect } from "../../auth.js";
+import { getGlobalRateLimiter } from "../../rate-limiter.js";
 import { loadConfig } from "../../../config/config.js";
 import { buildDeviceAuthPayload } from "../../device-auth.js";
 import { isLocalGatewayAddress } from "../../net.js";
@@ -58,7 +59,7 @@ import type { GatewayWsClient } from "../ws-types.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
-const DEVICE_SIGNATURE_SKEW_MS = 10 * 60 * 1000;
+const DEVICE_SIGNATURE_SKEW_MS = 60 * 1000; // 60 seconds - tighter window reduces replay attack surface
 
 type AuthProvidedKind = "token" | "password" | "none";
 
@@ -491,6 +492,36 @@ export function attachGatewayWsMessageHandler(params: {
           }
         }
 
+        // Auth rate limiting check
+        const clientIp = forwardedFor?.split(",")[0]?.trim() || remoteAddr || "unknown";
+        const rateLimiter = getGlobalRateLimiter();
+        const authAttemptCheck = rateLimiter.checkAuthAttempt(clientIp);
+
+        if (!authAttemptCheck.allowed) {
+          setHandshakeState("failed");
+          setCloseCause("auth-rate-limited", {
+            reason: authAttemptCheck.reason,
+            retryAfterMs: authAttemptCheck.retryAfterMs,
+            client: connectParams.client.id,
+            clientDisplayName: connectParams.client.displayName,
+          });
+          logWsControl.warn(
+            `Auth rate limited conn=${connId} remote=${remoteAddr ?? "?"} client=${clientLabel}: ${authAttemptCheck.reason}`,
+            { retryAfterMs: authAttemptCheck.retryAfterMs },
+          );
+          send({
+            type: "res",
+            id: frame.id,
+            ok: false,
+            error: errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              authAttemptCheck.reason ?? "auth rate limited",
+            ),
+          });
+          close(1008, truncateCloseReason(authAttemptCheck.reason ?? "auth rate limited"));
+          return;
+        }
+
         const authResult = await authorizeGatewayConnect({
           auth: resolvedAuth,
           connectAuth: connectParams.auth,
@@ -511,6 +542,9 @@ export function attachGatewayWsMessageHandler(params: {
           }
         }
         if (!authOk) {
+          // Record auth failure for rate limiting
+          rateLimiter.recordAuthFailure(clientIp);
+
           setHandshakeState("failed");
           logWsControl.warn(
             `unauthorized conn=${connId} remote=${remoteAddr ?? "?"} client=${clientLabel} ${connectParams.client.mode} v${connectParams.client.version} reason=${authResult.reason ?? "unknown"}`,
@@ -544,6 +578,9 @@ export function attachGatewayWsMessageHandler(params: {
           close(1008, truncateCloseReason(authMessage));
           return;
         }
+
+        // Clear auth failures on successful authentication
+        rateLimiter.clearAuthFailures(clientIp);
 
         if (device && devicePublicKey) {
           const requirePairing = async (reason: string, _paired?: { deviceId: string }) => {
