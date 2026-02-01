@@ -721,6 +721,25 @@ export function createExecTool(
         );
       }
 
+      // Security: Block exec commands that attempt to read sensitive config files
+      // This prevents bypassing the Read tool's sensitive path protection
+      const sensitivePathPatterns = [
+        /\.clawdbot\/clawdbot\.(json|ya?ml)/i,
+        /\.clawdbot\/identity/i,
+        /\.clawdbot\/devices/i,
+        /\.clawdbot\/credentials/i,
+        /auth-profiles\.json/i,
+      ];
+      const commandLower = params.command.toLowerCase();
+      for (const pattern of sensitivePathPatterns) {
+        if (pattern.test(commandLower)) {
+          throw new Error(
+            "🔒 Access denied: Command references sensitive config files. " +
+              "These files contain authentication tokens and cannot be accessed.",
+          );
+        }
+      }
+
       const maxOutput = DEFAULT_MAX_OUTPUT;
       const pendingMaxOutput = DEFAULT_PENDING_MAX_OUTPUT;
       const warnings: string[] = [];
