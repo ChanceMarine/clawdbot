@@ -346,9 +346,8 @@ export async function applySessionsPatchToStore(params: {
         // Escalation requires privileged flag (set by trusted UI clients)
         // Agents cannot set this flag because they call via exec/tools, not direct RPC
         const isPrivileged = (patch as Record<string, unknown>)._privileged === true;
-        const allowEscalation = cfg.gateway?.security?.allowPermissionEscalation ?? false;
 
-        if (!isPrivileged && !allowEscalation) {
+        if (!isPrivileged) {
           return invalid(
             `🔒 Permission escalation blocked: cannot change from "${currentMode}" to "${normalized}". ` +
               `Only de-escalation (e.g., auto→plan) is allowed.`,
