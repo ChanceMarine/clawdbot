@@ -729,6 +729,14 @@ export function createExecTool(
         /\.clawdbot\/devices/i,
         /\.clawdbot\/credentials/i,
         /auth-profiles\.json/i,
+        // Block directory traversal and glob patterns
+        /\.clawdbot\/\*\.json/i,
+        /\.clawdbot\/\*\*/i,
+        /cd\s+[^\s]*\.clawdbot/i,
+        /\.clawdbot[^\s]*\s*&&/i,
+        /\.clawdbot[^\s]*\s*\|/i,
+        // Block just mentioning the directory with commands that read
+        /\bcd\b.*\.clawdbot/i,
       ];
       const commandLower = params.command.toLowerCase();
       for (const pattern of sensitivePathPatterns) {
