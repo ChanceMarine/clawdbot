@@ -333,6 +333,29 @@ export async function applySessionsPatchToStore(params: {
       if (!normalized) {
         return invalid('invalid permissionMode (use "plan"|"ask"|"auto"|"dangerously-skip")');
       }
+
+      // Security: Prevent escalation from restrictive modes to permissive modes.
+      // This blocks agents from self-escalating via API calls.
+      // Escalation order: plan < ask < auto < dangerously-skip
+      const currentMode = existing?.permissionMode ?? "auto";
+      const escalationOrder = ["plan", "ask", "auto", "dangerously-skip"];
+      const currentLevel = escalationOrder.indexOf(currentMode);
+      const newLevel = escalationOrder.indexOf(normalized);
+
+      if (newLevel > currentLevel) {
+        // Escalation requires privileged flag (set by trusted UI clients)
+        // Agents cannot set this flag because they call via exec/tools, not direct RPC
+        const isPrivileged = (patch as Record<string, unknown>)._privileged === true;
+        const allowEscalation = cfg.gateway?.security?.allowPermissionEscalation ?? false;
+
+        if (!isPrivileged && !allowEscalation) {
+          return invalid(
+            `🔒 Permission escalation blocked: cannot change from "${currentMode}" to "${normalized}". ` +
+              `Only de-escalation (e.g., auto→plan) is allowed.`,
+          );
+        }
+      }
+
       next.permissionMode = normalized;
     }
   }

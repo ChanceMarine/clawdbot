@@ -31,10 +31,16 @@ const SENSITIVE_PATH_PATTERNS = [
   /\.env$/i,
   /\.env\.local/i,
   /\.env\.production/i,
-  // Clawdbot credentials
+  // Clawdbot sensitive files - block entire config directory
+  // This prevents agents from reading auth tokens, credentials, or session data
+  /\.clawdbot\/clawdbot\.json/i, // Main config with auth token
+  /\.clawdbot\/clawdbot\.ya?ml/i, // Alt config formats
   /\.clawdbot\/credentials/i,
   /\.clawdbot\/identity/i,
+  /\.clawdbot\/devices/i, // Paired device tokens
+  /\.clawdbot\/agents\/.*\/auth/i, // Agent auth profiles
   /auth-profiles\.json/i,
+  /gateway\.json/i, // Gateway discovery info
   // NPM tokens
   /\.npmrc/i,
   // Git credentials
